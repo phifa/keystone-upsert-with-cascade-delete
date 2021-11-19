@@ -1,0 +1,17 @@
+mutation upsertSamples($upsertArgs: [SampleUpdateArgs!]!) {
+  upsertSamples(upsertArgs: $upsertArgs) {
+    name
+    cars {
+      name
+    }
+    kids {
+      name
+      kiddos {
+        name
+        baby {
+          name
+        }
+      }
+    }
+  }
+}

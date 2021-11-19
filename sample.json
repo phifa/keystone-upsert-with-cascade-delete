@@ -1,0 +1,32 @@
+{
+  "upsertArgs": [
+    {
+      "where": {
+        "name": "George"
+      },
+      "data": {
+        "name": "George",
+        "cars": {
+          "create": {
+            "name": "Porsche"
+          }
+        },
+        "kids": {
+          "create": {
+            "name": "Son",
+            "kiddos": {
+              "create": {
+                "name": "Nephew",
+                "baby": {
+                  "create": {
+                    "name": "Baby Timmy"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
