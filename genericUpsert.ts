@@ -1,4 +1,13 @@
-import { KeystoneContext } from "@keystone-next/keystone/types";
+import { KeystoneContext } from '@keystone-6/core/types';
+import { uniqBy } from 'lodash';
+
+export function isNotUndefined<T>(value: T | undefined): value is T {
+  return value !== undefined;
+}
+
+export async function promiseHandler(prom: Promise<any>) {
+  return prom.then((data) => [null, data]).catch((err) => [err]);
+}
 
 interface RelSchema {
   field: string;
@@ -13,22 +22,17 @@ interface RelSchema {
   }[];
 }
 
-const gql = String.raw;
-
-function isNotUndefined<T>(value: T | undefined): value is T {
-  return value !== undefined;
-}
-
-async function removeExisting(
+async function deleteRelationships(
   context: KeystoneContext,
   model: string,
   identifier: string,
   identifierValues: string | number[],
-  relationships?: RelSchema[]
+  relationships?: RelSchema[],
+  isTopLevel = true
 ) {
   const query = relationships?.length
-    ? "id " + relationships?.map((item) => item.field + " { id }").join(" ")
-    : "id";
+    ? 'id ' + relationships?.map((item) => item.field + ' { id }').join(' ')
+    : 'id';
 
   // Get intersections, possibly with relations
   const foundIntersectionIdsWithRelations = await context.query[model].findMany(
@@ -57,6 +61,7 @@ async function removeExisting(
             ({ id }: { id: string }) => id
           );
           childrenIdsToDelete = [...childrenIdsToDelete, ...justIds];
+          // { many : false }
         } else {
           if (foundIntersectionRelation[relation.field].id) {
             childrenIdsToDelete.push(
@@ -73,12 +78,13 @@ async function removeExisting(
             .filter(isNotUndefined);
 
           // recursive call as long as n children are done
-          await removeExisting(
+          await deleteRelationships(
             context,
             relation.schema,
-            "id",
+            'id',
             childrenIdsToDelete,
-            subRelations
+            subRelations,
+            false
           );
         }
         // go to next relation
@@ -88,11 +94,29 @@ async function removeExisting(
     }
   }
 
-  // Remove model intersections
-  await context.query[model].deleteMany({
-    where: foundIntersectionIdsWithRelations.map((item) => ({ id: item.id })),
-    query: gql`id`,
-  });
+  // Only remove relationships, not the object itself
+  if (!isTopLevel) {
+    // Remove model intersections
+    const idsToDelete = uniqBy(
+      foundIntersectionIdsWithRelations.map((item) => ({
+        id: item.id,
+      })),
+      'id'
+    );
+
+    try {
+      await context.db[model].deleteMany({
+        // make sure, ids are unique, so no deletions of already deleted objects can be done
+        where: idsToDelete,
+      });
+    } catch (err) {
+      console.error(
+        'Error while executing deleteMany with ids',
+        idsToDelete,
+        err
+      );
+    }
+  }
 }
 
 export async function genericUpsert(
@@ -102,16 +126,60 @@ export async function genericUpsert(
   identifier: string,
   relationships?: RelSchema[]
 ): Promise<any[] | undefined> {
+  // [1,2,3] or ["UniqueValue", "AnotherUniqueVal"]
+  const parentIds = upsertArgs.map((t: any) => t.where[identifier]);
+
+  // Remove relationships but not the objects themselves
+  await deleteRelationships(
+    context,
+    model,
+    identifier,
+    parentIds,
+    relationships
+  );
+
+  // Get existing items, retrieve ids by identifier
+  const idsToUpdate = (
+    await context.db[model].findMany({
+      where: { [identifier]: { in: parentIds } },
+    })
+  ).map((item) => item[identifier]);
+
+  // Get an array of items that are already present in the database - the relationships will be created
+  const updateArgs = upsertArgs.filter(
+    (a) => idsToUpdate.indexOf(a.where[identifier]) !== -1
+  );
+  // Get an array of items that are not yet present in the database - the relationships will be created
+  const createArgs = upsertArgs
+    .filter((a) => idsToUpdate.indexOf(a.where[identifier]) === -1)
+    .map((a) => a.data);
+
+  let res = [];
+  // recursive func to remove relationships
   try {
-    // [1,2,3] or ["UniqueValue", "AnotherUniqueVal"]
-    const parentIds = upsertArgs.map((t: any) => t.where[identifier]);
-    // recursive func to remove relationships
-    await removeExisting(context, model, identifier, parentIds, relationships);
-    // create new entries
-    return await context.db[model].createMany({
-      data: upsertArgs.map((u: any) => u.data),
-    });
+    const updated = await context.db[model].updateMany({ data: updateArgs });
+    res.push(...updated);
   } catch (err) {
-    console.log("💩 generic upsert failed", err);
+    console.error(
+      `💩 Error in genericUpsert - updateMany for model: ${model} with ${identifier} failed`,
+      updateArgs,
+      err
+    );
+    throw err;
   }
+  // create new entries
+  try {
+    const created = await context.db[model].createMany({
+      data: createArgs,
+    });
+    res.push(...created);
+  } catch (err) {
+    console.error(
+      `💩 Error in genericUpsert - createMany for model: ${model} with ${identifier} failed`,
+      createArgs,
+      err
+    );
+    throw err;
+  }
+  return res;
 }

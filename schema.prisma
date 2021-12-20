@@ -7,29 +7,28 @@ datasource sqlite {
 }
 
 generator client {
-  provider   = "prisma-client-js"
-  output     = "node_modules/.prisma/client"
-  engineType = "binary"
+  provider = "prisma-client-js"
+  output   = "node_modules/.prisma/client"
 }
 
 model Sample {
   id   String        @id @default(cuid())
   name String        @unique @default("")
-  kids SampleChild[] @relation("Sample_kids_many")
-  cars SampleCar[]   @relation("Sample_cars_many")
+  kids SampleChild[] @relation("Sample_kids")
+  cars SampleCar[]   @relation("Sample_cars")
 }
 
 model SampleCar {
   id               String   @id @default(cuid())
   name             String   @default("")
-  from_Sample_cars Sample[] @relation("Sample_cars_many")
+  from_Sample_cars Sample[] @relation("Sample_cars")
 }
 
 model SampleChild {
   id               String             @id @default(cuid())
   name             String             @default("")
-  kiddos           SampleGrandChild[] @relation("SampleChild_kiddos_many")
-  from_Sample_kids Sample[]           @relation("Sample_kids_many")
+  kiddos           SampleGrandChild[] @relation("SampleChild_kiddos")
+  from_Sample_kids Sample[]           @relation("Sample_kids")
 }
 
 model SampleGrandChild {
@@ -37,7 +36,7 @@ model SampleGrandChild {
   name                    String                 @default("")
   baby                    SampleGreatGrandChild? @relation("SampleGrandChild_baby", fields: [babyId], references: [id])
   babyId                  String?                @map("baby")
-  from_SampleChild_kiddos SampleChild[]          @relation("SampleChild_kiddos_many")
+  from_SampleChild_kiddos SampleChild[]          @relation("SampleChild_kiddos")
 
   @@index([babyId])
 }
